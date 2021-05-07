@@ -27,6 +27,7 @@ package com.sonyericsson.hudson.plugins.gerrit.trigger.hudsontrigger;
 
 
 import com.sonymobile.tools.gerrit.gerritevents.dto.events.ChangeBasedEvent;
+import com.sonymobile.tools.gerrit.gerritevents.dto.events.ChangeMerged;
 import com.sonymobile.tools.gerrit.gerritevents.dto.events.GerritTriggeredEvent;
 import com.sonymobile.tools.gerrit.gerritevents.dto.events.RefUpdated;
 
@@ -270,6 +271,17 @@ public class GerritTriggerBuildChooser extends BuildChooser {
             GerritCause cause = build.getCause(GerritCause.class);
             if (cause != null) {
                 GerritTriggeredEvent event = cause.getEvent();
+                if (event instanceof ChangeMerged) {
+                    // when gerrit creates a merge commit for some submit types, we need the newrev or we get the
+                    // changes from the patchset before the merge and build the wrong source, in the case that
+                    // there is no merge commit, the newrev will match the patchset revision
+                    String newRev = ((ChangeMerged)event).getNewRev();
+                    if (newRev != null) {
+                        return newRev;
+                    }
+                    // else we are on an old version of gerrit that is not reporting newrev
+                    // so fall through to the old behavior
+                }
                 if (event instanceof ChangeBasedEvent) {
                     return ((ChangeBasedEvent)event).getPatchSet().getRevision();
                 }
@@ -292,6 +304,12 @@ public class GerritTriggerBuildChooser extends BuildChooser {
             GerritCause cause = build.getCause(GerritCause.class);
             if (cause != null) {
                 GerritTriggeredEvent event = cause.getEvent();
+                // For change-merged we need the project refname which is the ref for the branch we merged onto in
+                // case Gerrit created an automatic merge commit. The project object from the event stream is not
+                // available in the DTO objects so use the next best thing which is the branch name from the Change.
+                if (event instanceof ChangeMerged) {
+                    return "refs/heads/" + ((ChangeMerged)event).getChange().getBranch();
+                }
                 if (event instanceof ChangeBasedEvent) {
                     return ((ChangeBasedEvent)event).getPatchSet().getRef();
                 }

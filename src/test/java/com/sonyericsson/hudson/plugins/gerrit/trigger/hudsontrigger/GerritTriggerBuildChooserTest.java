@@ -14,6 +14,8 @@ import java.io.IOException;
 import java.io.Serializable;
 import hudson.model.Hudson;
 import org.jenkinsci.plugins.gitclient.GitClient;
+
+import com.sonymobile.tools.gerrit.gerritevents.dto.events.ChangeMerged;
 import com.sonymobile.tools.gerrit.gerritevents.dto.events.PatchsetCreated;
 import com.sonyericsson.hudson.plugins.gerrit.trigger.mock.Setup;
 import org.eclipse.jgit.lib.ObjectId;
@@ -103,8 +105,12 @@ public class GerritTriggerBuildChooserTest {
         GerritTriggerBuildChooser chooser = new GerritTriggerBuildChooser();
         final ObjectId fetchHead = ObjectId.fromString("7f3547c6d55946e25e99a847b5160d69e59994ba");
         final ObjectId patchsetRevision = ObjectId.fromString("38b0940738376ee1b66c332a2cb6d4d37bafa4e4");
+        // newRev here does not match patchsetRevision to simulate gerrit automatically creating a merge commit
+        final ObjectId newRev = ObjectId.fromString("14332a762fa01cfcb65e637ecce3bc621b44a381");
         final String singleBranch = "origin/master";
+        final String changeBranch = "master";
         final String patchsetRefspec = "refs/changes/98/99498/2";
+        final String changeMergedRefspec = "refs/heads/master";
 
         // Mock the necessary objects we will need to make this work
         FreeStyleProject p = mock(FreeStyleProject.class);
@@ -143,5 +149,50 @@ public class GerritTriggerBuildChooserTest {
         assertEquals(1, revs.iterator().next().getBranches().size());
         assertEquals(patchsetRefspec, revs.iterator().next().getBranches().iterator().next().getName());
         assertEquals(patchsetRevision, revs.iterator().next().getBranches().iterator().next().getSHA1());
+
+        // Mock the objects to report a gerrit revision was built
+        // build.getCause returns a change-merged event without a newrev to test old gerrit versions
+        ChangeMerged changeMerged = Setup.createChangeMerged();
+        changeMerged.getPatchSet().setRef(patchsetRefspec);
+        changeMerged.getPatchSet().setRevision(patchsetRevision.toString());
+        changeMerged.getChange().setBranch(changeBranch);
+
+        gerritCause = new GerritCause();
+        gerritCause.setEvent(changeMerged);
+        when(b.getCause(GerritCause.class)).thenReturn(gerritCause);
+        when(git.revParse(changeMergedRefspec)).thenReturn(patchsetRevision);
+        when(git.revParse(patchsetRevision.toString())).thenReturn(patchsetRevision);
+
+        // get the candidate revision(s)
+        revs = chooser.getCandidateRevisions(true, singleBranch, git, null, null, context);
+
+        // Check that we correctly use branch when a gerrit revision is used
+        assertEquals(1, revs.size());
+        assertEquals(1, revs.iterator().next().getBranches().size());
+        assertEquals(changeMergedRefspec, revs.iterator().next().getBranches().iterator().next().getName());
+        assertEquals(patchsetRevision, revs.iterator().next().getBranches().iterator().next().getSHA1());
+
+        // Mock the objects to report a gerrit revision was built
+        // build.getCause returns a change-merged event with a newrev value to test current gerrit versions
+        changeMerged = Setup.createChangeMerged();
+        changeMerged.getPatchSet().setRef(patchsetRefspec);
+        changeMerged.getPatchSet().setRevision(patchsetRevision.toString());
+        changeMerged.getChange().setBranch(changeBranch);
+        changeMerged.setNewRev(newRev.toString());
+
+        gerritCause = new GerritCause();
+        gerritCause.setEvent(changeMerged);
+        when(b.getCause(GerritCause.class)).thenReturn(gerritCause);
+        when(git.revParse(changeMergedRefspec)).thenReturn(newRev);
+        when(git.revParse(newRev.toString())).thenReturn(newRev);
+
+        // get the candidate revision(s)
+        revs = chooser.getCandidateRevisions(true, singleBranch, git, null, null, context);
+
+        // Check that we correctly use branch when a gerrit revision is used
+        assertEquals(1, revs.size());
+        assertEquals(1, revs.iterator().next().getBranches().size());
+        assertEquals(changeMergedRefspec, revs.iterator().next().getBranches().iterator().next().getName());
+        assertEquals(newRev, revs.iterator().next().getBranches().iterator().next().getSHA1());
     }
 }
